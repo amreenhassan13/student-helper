@@ -2,101 +2,66 @@ import { NextResponse } from 'next/server';
 import { connectToDatabase } from '@/lib/db';
 import Material from '@/models/Material';
 
-// Force Next.js to NEVER cache this API route so you always see fresh votes
 export const dynamic = 'force-dynamic';
 
-// GET: Fetch all materials (optionally filtered by courseCode)
-export async function GET(request) {
+export async function GET() {
   try {
     await connectToDatabase();
-    
-    const { searchParams } = new URL(request.url);
-    const courseCode = searchParams.get('courseCode');
-
-    let query = {};
-    if (courseCode) {
-      query.courseCode = courseCode;
-    }
-
-    const materials = await Material.find(query).sort({ createdAt: -1 });
-    
+    const materials = await Material.find().sort({ createdAt: -1 });
     return NextResponse.json(materials, { status: 200 });
   } catch (error) {
-    console.error('Database GET Error:', error);
     return NextResponse.json({ error: 'Failed to fetch materials' }, { status: 500 });
   }
 }
 
-// POST: Create a new material entry
 export async function POST(request) {
   try {
     await connectToDatabase();
-    
     const body = await request.json();
-    const { title, courseCode, category, link } = body;
+    const { title, courseCode, description, fileUrl, uploader, userEmail } = body;
 
-    if (!title || !courseCode || !category || !link) {
-      return NextResponse.json(
-        { error: 'Missing required fields.' }, 
-        { status: 400 }
-      );
+    if (!title || !courseCode || !description || !fileUrl || !userEmail) {
+      return NextResponse.json({ error: 'Missing required fields.' }, { status: 400 });
     }
 
     const newMaterial = await Material.create({
-      title,
-      courseCode,
-      category,
-      link,
+      title, courseCode, description, fileUrl, uploader, userEmail
     });
 
     return NextResponse.json(newMaterial, { status: 201 });
   } catch (error) {
-    console.error('Database POST Error:', error);
-    return NextResponse.json({ error: 'Failed to create material' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to post material' }, { status: 500 });
   }
 }
 
-// PUT: Update votes for a material (Bulletproof Version)
 export async function PUT(request) {
   try {
     await connectToDatabase();
-    
-    const body = await request.json();
-    const { id, action } = body; 
+    const { id, type } = await request.json();
 
-    if (!id || !action) {
-      return NextResponse.json(
-        { error: 'Missing material ID or action' }, 
-        { status: 400 }
-      );
-    }
+    if (!id || !type) return NextResponse.json({ error: 'Missing data' }, { status: 400 });
 
-    // 1. Find the exact material document first
-    const material = await Material.findById(id);
+    // Increment upvotes or downvotes based on the type passed from the frontend
+    const update = type === 'upvote' ? { $inc: { upvotes: 1 } } : { $inc: { downvotes: 1 } };
+    const updatedMaterial = await Material.findByIdAndUpdate(id, update, { new: true });
 
-    if (!material) {
-      return NextResponse.json({ error: 'Material not found' }, { status: 404 });
-    }
-
-    // 2. Modify the values safely in JavaScript (handling missing fields gracefully)
-    if (action === 'upvote') {
-      material.upvotes = (material.upvotes || 0) + 1;
-    } else if (action === 'downvote') {
-      material.downvotes = (material.downvotes || 0) + 1;
-    } else {
-      return NextResponse.json(
-        { error: 'Invalid action. Must be upvote or downvote.' }, 
-        { status: 400 }
-      );
-    }
-
-    // 3. Save the document back to MongoDB
-    await material.save();
-
-    // 4. Return the guaranteed fresh document to the frontend
-    return NextResponse.json(material, { status: 200 });
+    return NextResponse.json(updatedMaterial, { status: 200 });
   } catch (error) {
-    console.error('Database PUT Error:', error);
-    return NextResponse.json({ error: 'Failed to update votes' }, { status: 500 });
+    return NextResponse.json({ error: 'Failed to vote' }, { status: 500 });
+  }
+}
+
+// NEW: Delete Route
+export async function DELETE(request) {
+  try {
+    await connectToDatabase();
+    const id = new URL(request.url).searchParams.get('id');
+    
+    if (!id) return NextResponse.json({ error: 'Missing ID.' }, { status: 400 });
+
+    await Material.findByIdAndDelete(id);
+    return NextResponse.json({ message: 'Material deleted' }, { status: 200 });
+  } catch (error) {
+    return NextResponse.json({ error: 'Failed to delete material' }, { status: 500 });
   }
 }

@@ -6,27 +6,29 @@ export default function MaterialsPage() {
   const [materials, setMaterials] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [user, setUser] = useState(null);
+  
+  // Search State
+  const [searchQuery, setSearchQuery] = useState("");
 
   // Form State
   const [title, setTitle] = useState("");
   const [courseCode, setCourseCode] = useState("");
-  const [category, setCategory] = useState("Lecture Notes");
-  const [link, setLink] = useState("");
+  const [description, setDescription] = useState("");
+  const [fileUrl, setFileUrl] = useState("");
 
-  // Filter State
-  const [filterCode, setFilterCode] = useState("");
+  useEffect(() => {
+    fetchMaterials();
+    const storedUser = localStorage.getItem("user");
+    if (storedUser) setUser(JSON.parse(storedUser));
+  }, []);
 
-  const fetchMaterials = async (code = "") => {
+  const fetchMaterials = async () => {
     setLoading(true);
-    setError(null);
     try {
-      const url = code ? `/api/materials?courseCode=${code}` : "/api/materials";
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error("Failed to fetch materials");
-      }
-      const data = await response.json();
-      setMaterials(data);
+      const response = await fetch("/api/materials");
+      if (!response.ok) throw new Error("Failed to fetch repository");
+      setMaterials(await response.json());
     } catch (err) {
       setError(err.message);
     } finally {
@@ -34,238 +36,172 @@ export default function MaterialsPage() {
     }
   };
 
-  useEffect(() => {
-    fetchMaterials();
-  }, []);
-
-  const handleFilterSubmit = (e) => {
+  const handlePostSubmit = async (e) => {
     e.preventDefault();
-    fetchMaterials(filterCode);
-  };
-
-  const handleClearFilter = () => {
-    setFilterCode("");
-    fetchMaterials("");
-  };
-
-  const handleUploadSubmit = async (e) => {
-    e.preventDefault();
-    setError(null);
-
-    const newMaterial = { title, courseCode, category, link };
+    if (!user) return alert("Log in to upload resources.");
+    
+    const newMaterial = { 
+      title, courseCode, description, fileUrl, 
+      uploader: user.name, userEmail: user.email 
+    };
 
     try {
       const response = await fetch("/api/materials", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(newMaterial),
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || "Failed to upload material");
-      }
+      if (!response.ok) throw new Error("Failed to post");
 
-      // Clear form and refresh the list
-      setTitle("");
-      setCourseCode("");
-      setCategory("Lecture Notes");
-      setLink("");
-      fetchMaterials(filterCode);
+      setTitle(""); setCourseCode(""); setDescription(""); setFileUrl("");
+      fetchMaterials(); 
     } catch (err) {
       setError(err.message);
     }
   };
 
-  // NEW: Handle Upvoting and Downvoting
-  const handleVote = async (id, action) => {
+  const handleVote = async (id, type) => {
+    if (!user) return alert("Please log in to vote.");
     try {
       const response = await fetch("/api/materials", {
         method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ id, action }),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, type }),
       });
 
-      if (!response.ok) {
-        throw new Error("Failed to register vote");
-      }
+      if (!response.ok) throw new Error("Failed to register vote");
 
-      const updatedMaterial = await response.json();
-
-      // Instantly update the UI by replacing the old material data with the newly fetched data
-      setMaterials((prevMaterials) =>
-        prevMaterials.map((mat) => (mat._id === id ? updatedMaterial : mat))
-      );
+      const updatedDoc = await response.json();
+      setMaterials(materials.map(m => m._id === id ? updatedDoc : m));
     } catch (err) {
-      // Use a simple alert for voting errors so it doesn't disrupt the whole page layout
       alert(err.message);
     }
   };
+
+  // NEW: Delete Function
+  const handleDelete = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this material?")) return;
+    try {
+      const response = await fetch(`/api/materials?id=${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete");
+      setMaterials((prev) => prev.filter((item) => item._id !== id));
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+
+  // Instant Search Logic
+  const filteredMaterials = materials.filter(m => 
+    m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+    m.courseCode.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   return (
     <div className="max-w-6xl mx-auto p-6 font-sans">
       <h1 className="text-3xl font-bold mb-8 text-gray-800">Course Material Repository</h1>
 
-      {error && (
-        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-6">
-          {error}
-        </div>
-      )}
+      {error && <div className="bg-red-100 text-red-700 px-4 py-3 rounded mb-6">{error}</div>}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+        
         {/* Left Column: Upload Form */}
-        <div className="md:col-span-1 bg-white p-6 rounded-lg shadow-md border border-gray-200 h-fit">
-          <h2 className="text-xl font-semibold mb-4 text-gray-700">Upload Material</h2>
-          <form onSubmit={handleUploadSubmit} className="space-y-4">
+        <div className="lg:col-span-1 bg-white p-6 rounded-lg shadow-md border border-gray-200 h-fit sticky top-6">
+          <h2 className="text-xl font-semibold mb-4 text-gray-700">Upload a Resource</h2>
+          
+          {!user && (
+            <div className="mb-4 text-sm text-amber-700 bg-amber-50 p-3 rounded border border-amber-200">
+              <a href="/login" className="font-bold underline">Log in</a> to contribute materials.
+            </div>
+          )}
+
+          <form onSubmit={handlePostSubmit} className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Title</label>
-              <input
-                type="text"
-                required
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., Midterm Review Guide"
-              />
+              <input type="text" required disabled={!user} value={title} onChange={(e) => setTitle(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2" placeholder="e.g., Midterm Study Guide" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Course Code</label>
-              <input
-                type="text"
-                required
-                value={courseCode}
-                onChange={(e) => setCourseCode(e.target.value.toUpperCase())}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="e.g., CS101"
-              />
+              <input type="text" required disabled={!user} value={courseCode} onChange={(e) => setCourseCode(e.target.value.toUpperCase())} className="w-full border border-gray-300 rounded px-3 py-2" placeholder="e.g., CS101" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-              <select
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="Lecture Notes">Lecture Notes</option>
-                <option value="Past Exams">Past Exams</option>
-                <option value="Syllabus">Syllabus</option>
-                <option value="Study Guides">Study Guides</option>
-                <option value="Other">Other</option>
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
+              <textarea required disabled={!user} rows="3" value={description} onChange={(e) => setDescription(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2 resize-none text-sm" placeholder="What does this document cover?" />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Link URL</label>
-              <input
-                type="url"
-                required
-                value={link}
-                onChange={(e) => setLink(e.target.value)}
-                className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                placeholder="https://drive.google.com/..."
-              />
+              <label className="block text-sm font-medium text-gray-700 mb-1">File URL</label>
+              <input type="url" required disabled={!user} value={fileUrl} onChange={(e) => setFileUrl(e.target.value)} className="w-full border border-gray-300 rounded px-3 py-2" placeholder="Google Drive or Dropbox link" />
             </div>
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded transition-colors"
-            >
-              Upload Resource
+            <button type="submit" disabled={!user} className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white font-bold py-2 px-4 rounded transition-colors">
+              Upload Material
             </button>
           </form>
         </div>
 
-        {/* Right Column: Material List & Filter */}
-        <div className="md:col-span-2">
-          <div className="bg-white p-4 rounded-lg shadow-md border border-gray-200 mb-6 flex items-end gap-4">
-            <form onSubmit={handleFilterSubmit} className="flex-1 flex gap-2 items-end">
-              <div className="flex-1">
-                <label className="block text-sm font-medium text-gray-700 mb-1">Filter by Course Code</label>
-                <input
-                  type="text"
-                  value={filterCode}
-                  onChange={(e) => setFilterCode(e.target.value.toUpperCase())}
-                  className="w-full border border-gray-300 rounded px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  placeholder="e.g., MATH200"
-                />
-              </div>
-              <button
-                type="submit"
-                className="bg-gray-800 hover:bg-gray-900 text-white font-bold py-2 px-4 rounded"
-              >
-                Filter
-              </button>
-            </form>
-            <button
-              onClick={handleClearFilter}
-              className="bg-gray-200 hover:bg-gray-300 text-gray-800 font-bold py-2 px-4 rounded"
-            >
-              Clear
-            </button>
+        {/* Right Column: Repository Database */}
+        <div className="lg:col-span-2">
+          
+          {/* Search Bar */}
+          <div className="mb-6">
+            <input 
+              type="text" 
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="🔍 Search by course code or title..." 
+              className="w-full border border-gray-300 rounded-lg px-4 py-3 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500 text-lg"
+            />
           </div>
 
           {loading ? (
-            <p className="text-gray-500">Loading materials...</p>
+            <p className="text-gray-500">Querying database...</p>
           ) : materials.length === 0 ? (
             <div className="bg-gray-50 p-8 text-center rounded border border-dashed border-gray-300">
-              <p className="text-gray-500">No materials found. Be the first to upload!</p>
+              <p className="text-gray-500">The repository is empty. Be the first to upload a guide!</p>
+            </div>
+          ) : filteredMaterials.length === 0 ? (
+            <div className="bg-gray-50 p-8 text-center rounded border border-dashed border-gray-300">
+              <p className="text-gray-500">No materials match your search query.</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {materials.map((mat) => (
-                <div key={mat._id} className="bg-white p-5 rounded-lg shadow border border-gray-100 flex flex-col sm:flex-row sm:items-center gap-4">
-                  
-                  {/* Voting Block */}
-                  <div className="flex sm:flex-col items-center justify-center gap-1 bg-gray-50 p-2 rounded border border-gray-200 min-w-[50px]">
-                    <button
-                      onClick={() => handleVote(mat._id, "upvote")}
-                      className="text-gray-400 hover:text-blue-600 font-bold px-2 py-1 transition-colors text-lg"
-                      title="Upvote"
-                    >
-                      ▲
-                    </button>
-                    {/* Displaying Net Score (Upvotes - Downvotes) */}
-                    <span className={`font-bold text-sm ${(mat.upvotes || 0) - (mat.downvotes || 0) >= 0 ? 'text-gray-700' : 'text-red-600'}`}>
-                      {(mat.upvotes || 0) - (mat.downvotes || 0)}
-                    </span>
-                    <button
-                      onClick={() => handleVote(mat._id, "downvote")}
-                      className="text-gray-400 hover:text-red-600 font-bold px-2 py-1 transition-colors text-lg"
-                      title="Downvote"
-                    >
-                      ▼
-                    </button>
-                  </div>
+            <div className="space-y-6">
+              {filteredMaterials.map((material) => {
+                const netScore = material.upvotes - material.downvotes;
+                let scoreColor = "text-gray-600";
+                if (netScore > 0) scoreColor = "text-green-600";
+                if (netScore < 0) scoreColor = "text-red-600";
 
-                  {/* Material Details */}
-                  <div className="flex-1">
-                    <h3 className="text-lg font-bold text-blue-700">{mat.title}</h3>
-                    <div className="flex flex-wrap gap-2 mt-2 text-sm text-gray-600">
-                      <span className="bg-blue-100 text-blue-800 px-2 py-1 rounded text-xs font-semibold">
-                        {mat.courseCode}
-                      </span>
-                      <span className="bg-gray-100 px-2 py-1 rounded text-xs">
-                        {mat.category}
-                      </span>
-                      <span className="text-gray-400 text-xs flex items-center">
-                        Uploaded: {new Date(mat.createdAt).toLocaleDateString()}
-                      </span>
+                return (
+                  <div key={material._id} className="bg-white p-6 rounded-lg shadow-sm border border-gray-200 flex gap-4 relative group transition-shadow hover:shadow-md">
+                    
+                    {/* Delete Button (Only visible if logged in user owns the post) */}
+                    {user && user.email === material.userEmail && (
+                      <button onClick={() => handleDelete(material._id)} className="absolute top-4 right-4 text-gray-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity bg-white" title="Remove Record">✕</button>
+                    )}
+                    
+                    {/* Voting Sidebar */}
+                    <div className="flex flex-col items-center justify-start bg-gray-50 px-3 py-2 rounded border border-gray-100 min-w-[60px]">
+                      <button onClick={() => handleVote(material._id, 'upvote')} className="text-xl text-gray-400 hover:text-green-600 transition-colors">▲</button>
+                      <span className={`font-bold my-1 ${scoreColor}`}>{netScore}</span>
+                      <button onClick={() => handleVote(material._id, 'downvote')} className="text-xl text-gray-400 hover:text-red-600 transition-colors">▼</button>
+                    </div>
+
+                    {/* Content Body */}
+                    <div className="flex-1 pr-6">
+                      <div className="mb-2">
+                        <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2 py-0.5 rounded tracking-wider uppercase mb-1 inline-block">{material.courseCode}</span>
+                        <h3 className="text-2xl font-bold text-gray-900 leading-tight">{material.title}</h3>
+                        <p className="text-sm text-gray-500 mt-1">Uploaded by <span className="font-semibold text-gray-700">{material.uploader}</span> • {new Date(material.createdAt).toLocaleDateString()}</p>
+                      </div>
+                      
+                      <p className="text-gray-700 text-sm mb-4 leading-relaxed">{material.description}</p>
+                      
+                      <a href={material.fileUrl} target="_blank" rel="noopener noreferrer" className="inline-block bg-gray-900 hover:bg-gray-800 text-white font-bold py-1.5 px-4 rounded text-sm transition-colors shadow-sm">
+                        ↓ Access Resource
+                      </a>
                     </div>
                   </div>
-
-                  {/* Action Button */}
-                  <a
-                    href={mat.link}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="inline-block bg-green-600 hover:bg-green-700 text-white text-sm font-bold py-2 px-4 rounded transition-colors text-center whitespace-nowrap"
-                  >
-                    View Material
-                  </a>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
